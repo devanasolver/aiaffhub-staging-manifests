@@ -1,4 +1,4 @@
-x-app-image: &app-image ghcr.io/devanasolver/aiaffhub-marketplace@sha256:118648f77ec1476f4f48593b0c0defa5c0902b04feae526c26d30ffc75571647
+x-app-image: &app-image ghcr.io/devanasolver/aiaffhub-marketplace@sha256:ffcef76f207b7e8655ef240ef7ca92a90af95eca43a70b03572c0199e6b3580e
 services:
   init:
     image: *app-image
@@ -45,7 +45,7 @@ services:
       retries: 10
     command: [postgres, -c, shared_buffers=32MB, -c, max_connections=25]
   app:
-    image: ghcr.io/devanasolver/aiaffhub-marketplace@sha256:118648f77ec1476f4f48593b0c0defa5c0902b04feae526c26d30ffc75571647
+    image: ghcr.io/devanasolver/aiaffhub-marketplace@sha256:ffcef76f207b7e8655ef240ef7ca92a90af95eca43a70b03572c0199e6b3580e
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
