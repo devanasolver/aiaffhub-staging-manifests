@@ -1,0 +1,96 @@
+x-app-image: &app-image ghcr.io/devanasolver/aiaffhub-marketplace@sha256:1fa2a25c4e29b9fb78acd8840b899d094ef2b9a3b2553df77ed458c3e0359404
+services:
+  init:
+    image: *app-image
+    user: "0:0"
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 64m
+    cpus: 0.10
+    pids_limit: 32
+    network_mode: none
+    volumes: ["secrets:/secrets"]
+    command:
+      - node
+      - --input-type=module
+      - -e
+      - |
+        import fs from 'node:fs';import {randomBytes} from 'node:crypto';
+        for(const name of ['db-password','rate-limit']) {
+          if(!fs.existsSync('/secrets/'+name)) fs.writeFileSync('/secrets/'+name,randomBytes(32).toString('hex'),{mode:0o444,flag:'wx'});
+        }
+        console.log('Staging secrets initialized without disclosure.');
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.20
+    pids_limit: 64
+    security_opt: [no-new-privileges:true]
+    environment:
+      POSTGRES_USER: aiaffhub
+      POSTGRES_DB: aiaffhub_staging
+      POSTGRES_PASSWORD_FILE: /secrets/db-password
+    volumes:
+      - secrets:/secrets:ro
+      - database:/var/lib/postgresql/data
+    depends_on:
+      init: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U aiaffhub -d aiaffhub_staging]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    command: [postgres, -c, shared_buffers=32MB, -c, max_connections=25]
+  app:
+    image: *app-image
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    cpus: 0.30
+    pids_limit: 64
+    ports: ["127.0.0.1:3101:3000"]
+    volumes: ["secrets:/secrets:ro"]
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      SITE_URL: https://aiaffhub-staging.dailyaitools.cloud
+      PILOT_REGISTRATION: closed
+      TRUST_CLOUDFLARE_COUNTRY: "false"
+    networks:
+      default:
+      proxy:
+        aliases: [aiaffhub-staging-app]
+    depends_on:
+      db: {condition: service_healthy}
+    command:
+      - node
+      - --input-type=module
+      - -e
+      - |
+        import fs from 'node:fs';import {spawnSync,spawn} from 'node:child_process';
+        const env={...process.env,DATABASE_URL:'postgresql://aiaffhub:'+fs.readFileSync('/secrets/db-password','utf8')+'@db:5432/aiaffhub_staging',RATE_LIMIT_SECRET:fs.readFileSync('/secrets/rate-limit','utf8')};
+        const migration=spawnSync('node',['migrate.mjs'],{env,stdio:'inherit'});
+        if(migration.status!==0) process.exit(migration.status||1);
+        const child=spawn('node',['server.mjs'],{env,stdio:'inherit'});
+        for(const sig of ['SIGTERM','SIGINT'])process.on(sig,()=>child.kill(sig));
+        child.on('exit',code=>process.exit(code||0));
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+volumes:
+  secrets:
+    name: aiaffhub-staging-secrets
+  database:
+    name: aiaffhub-staging-database
+networks:
+  proxy:
+    external: true
+    name: infra-proxy_default
