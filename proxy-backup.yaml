@@ -1,0 +1,43 @@
+services:
+  backup:
+    image: python:3.12-alpine
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    cpus: 0.10
+    pids_limit: 32
+    network_mode: none
+    volumes:
+      - proxy_data:/source-data:ro
+      - proxy_certs:/source-certs:ro
+      - backup_data:/backup
+    command:
+      - python
+      - -c
+      - |
+        import sqlite3, pathlib, tarfile, datetime, os
+        os.umask(0o077)
+        target=pathlib.Path('/backup')/datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+        target.mkdir()
+        source=sqlite3.connect('file:/source-data/database.sqlite?mode=ro',uri=True,timeout=10)
+        dest=sqlite3.connect(str(target/'database.sqlite'))
+        source.backup(dest,pages=32,sleep=0.1)
+        assert dest.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
+        dest.close();source.close()
+        with tarfile.open(target/'proxy-files.tar.gz','w:gz') as archive:
+          for root in ('/source-data','/source-certs'):
+            for item in pathlib.Path(root).iterdir():
+              if not item.name.startswith('database.sqlite'):
+                archive.add(item,arcname=pathlib.Path(root).name+'/'+item.name)
+        print('BACKUP_OK',str(target),'SQLite integrity verified; proxy files archived',flush=True)
+volumes:
+  proxy_data:
+    external: true
+    name: infra-proxy_npm_data
+  proxy_certs:
+    external: true
+    name: infra-proxy_npm_letsencrypt
+  backup_data:
+    name: aiaffhub-staging-proxy-backup
