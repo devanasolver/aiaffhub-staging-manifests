@@ -1,0 +1,25 @@
+services:
+  inventory:
+    image: alpine:3.22
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 64m
+    cpus: 0.10
+    network_mode: none
+    volumes:
+      - /proc:/hostproc:ro
+      - /var/lib/docker/volumes:/inventory:ro
+    command:
+      - /bin/sh
+      - -c
+      - |
+        echo VOLUME_NAMES
+        find /inventory -mindepth 1 -maxdepth 1 -type d -print
+        echo LISTEN_IPV4
+        cat /hostproc/1/net/tcp
+        echo LISTEN_IPV6
+        cat /hostproc/1/net/tcp6
+        echo NETWORK_ROUTES
+        cat /hostproc/1/net/route
