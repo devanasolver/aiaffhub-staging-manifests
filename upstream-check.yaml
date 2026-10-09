@@ -1,0 +1,29 @@
+services:
+  check:
+    image: ghcr.io/devanasolver/aiaffhub-marketplace@sha256:1fa2a25c4e29b9fb78acd8840b899d094ef2b9a3b2553df77ed458c3e0359404
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 64m
+    cpus: 0.10
+    pids_limit: 32
+    networks: [proxy]
+    command:
+      - node
+      - --input-type=module
+      - -e
+      - |
+        for(const path of ['/healthz','/','/campaigns','/auth','/dashboard','/admin']) {
+          const response=await fetch('http://aiaffhub-staging-app:3000'+path,{redirect:'manual'});
+          const body=await response.text();
+          console.log('CHECK',path,response.status,'bytes',body.length);
+          if(path==='/healthz') {if(!response.ok)process.exit(1);console.log('DATABASE_HEALTH',body);}
+          if(path==='/'&&!body.includes('AiAffHub'))process.exit(1);
+          if(['/dashboard','/admin'].includes(path)&&response.status===200)process.exit(1);
+        }
+        console.log('UPSTREAM_OK');
+networks:
+  proxy:
+    external: true
+    name: infra-proxy_default
